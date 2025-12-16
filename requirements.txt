@@ -1,3 +1,5 @@
-ffmpeg-python
-discord.py 
+discord.py
 PyNaCl
+ffmpeg-python
+Flask
+gunicorn
