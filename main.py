@@ -2,75 +2,79 @@ import os
 import discord
 from discord.ext import commands
 import asyncio
+from flask import Flask
+import threading
 
-# ----------------- Intents Setup -----------------
+# --- Hosting Configuration (Flask) ---
+server = Flask(__name__)
+
+@server.route('/')
+def home():
+    return "Discord Bot is hosted and running!", 200
+
+def run_flask():
+    # Run Flask on a different port internally if needed, 
+    # but Gunicorn handles the main execution in this setup.
+    server.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+# --- Discord Bot Logic ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-# Prefix '/' ব্যবহার করা হয়েছে
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-# ----------------- Music Control Buttons -----------------
 class MusicControls(discord.ui.View):
     def __init__(self, voice_client):
         super().__init__(timeout=None)
         self.vc = voice_client
 
-    # ⏯️ Pause / Resume
-    @discord.ui.button(label="Pause/Resume", style=discord.ButtonStyle.primary, emoji="⏯️")
+    @discord.ui.button(label="Pause/Resume", style=discord.ButtonStyle.primary)
     async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.vc.is_playing():
             self.vc.pause()
-            await interaction.response.send_message("⏸️ Paused", ephemeral=True)
+            await interaction.response.send_message("Paused", ephemeral=True)
         elif self.vc.is_paused():
             self.vc.resume()
-            await interaction.response.send_message("▶️ Resumed", ephemeral=True)
+            await interaction.response.send_message("Resumed", ephemeral=True)
         else:
-            await interaction.response.send_message("⚠️ Nothing is playing.", ephemeral=True)
+            await interaction.response.send_message("Nothing is playing.", ephemeral=True)
 
-    # ⏹️ Stop
-    @discord.ui.button(label="Stop", style=discord.ButtonStyle.danger, emoji="⏹️")
+    @discord.ui.button(label="Stop", style=discord.ButtonStyle.danger)
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.vc.is_connected():
             await self.vc.disconnect()
-            await interaction.response.send_message("⏹️ Stopped and disconnected.", ephemeral=True)
+            await interaction.response.send_message("Stopped and disconnected.", ephemeral=True)
             self.stop()
         else:
-            await interaction.response.send_message("⚠️ Not connected.", ephemeral=True)
+            await interaction.response.send_message("Not connected.", ephemeral=True)
 
-    # 🔊 Volume Up
-    @discord.ui.button(label="Vol +", style=discord.ButtonStyle.success, emoji="🔊")
+    @discord.ui.button(label="Vol +", style=discord.ButtonStyle.success)
     async def vol_up(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.vc.source and isinstance(self.vc.source, discord.PCMVolumeTransformer):
             self.vc.source.volume = min(self.vc.source.volume + 0.1, 2.0)
             await interaction.response.send_message(
-                f"🔊 Volume: {int(self.vc.source.volume * 100)}%", ephemeral=True
+                f"Volume: {int(self.vc.source.volume * 100)}%", ephemeral=True
             )
         else:
-            await interaction.response.send_message("⚠️ Volume adjust করা যাচ্ছে না.", ephemeral=True)
+            await interaction.response.send_message("Volume adjust error.", ephemeral=True)
 
-    # 🔉 Volume Down
-    @discord.ui.button(label="Vol -", style=discord.ButtonStyle.secondary, emoji="🔉")
+    @discord.ui.button(label="Vol -", style=discord.ButtonStyle.secondary)
     async def vol_down(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.vc.source and isinstance(self.vc.source, discord.PCMVolumeTransformer):
             self.vc.source.volume = max(self.vc.source.volume - 0.1, 0.0)
             await interaction.response.send_message(
-                f"🔉 Volume: {int(self.vc.source.volume * 100)}%", ephemeral=True
+                f"Volume: {int(self.vc.source.volume * 100)}%", ephemeral=True
             )
         else:
-            await interaction.response.send_message("⚠️ Volume adjust করা যাচ্ছে না.", ephemeral=True)
+            await interaction.response.send_message("Volume adjust error.", ephemeral=True)
 
-# ----------------- /play Command -----------------
 @bot.command(name="play")
 async def play(ctx):
-    # User voice channel check
     if not ctx.author.voice:
-        return await ctx.send("❌ আপনি কোনো ভয়েস চ্যানেলে নেই!")
+        return await ctx.send("You are not in a voice channel")
 
     voice_channel = ctx.author.voice.channel
-
-    # Audio file detect (Attachment / Reply)
     file_url = None
 
     if ctx.message.attachments:
@@ -81,11 +85,8 @@ async def play(ctx):
             file_url = ref_msg.attachments[0].url
 
     if not file_url:
-        return await ctx.send(
-            "❌ কোনো অডিও ফাইল পাওয়া যায়নি!\nফাইল অ্যাটাচ করুন অথবা ফাইলের মেসেজে রিপ্লাই দিন।"
-        )
+        return await ctx.send("No audio file found")
 
-    # Voice connect
     if ctx.voice_client is None:
         vc = await voice_channel.connect()
     else:
@@ -111,22 +112,30 @@ async def play(ctx):
         filename = file_url.split("/")[-1].split("?")[0]
 
         await ctx.send(
-            f"🎶 **Playing:** `{filename}`\n🎛 **Controls:**",
+            f"Playing: {filename}\nControls:",
             view=view
         )
 
     except Exception as e:
-        await ctx.send(f"⚠️ Error: {e}")
+        await ctx.send(f"Error: {e}")
 
-# ----------------- Ready Event -----------------
 @bot.event
 async def on_ready():
-    print(f"✅ Logged in as {bot.user}")
+    print(f"Logged in as {bot.user}")
 
-# ----------------- Token from Environment Variable -----------------
+# --- Execution ---
 TOKEN = os.getenv("BOT_TOKEN")
 
 if not TOKEN:
-    raise RuntimeError("❌ BOT_TOKEN environment variable পাওয়া যায়নি!")
+    raise RuntimeError("BOT_TOKEN not found")
 
-bot.run(TOKEN)
+def start_bot():
+    bot.run(TOKEN)
+
+# Start Discord bot in a separate thread
+threading.Thread(target=start_bot, daemon=True).start()
+
+# Main entry point for Gunicorn
+if __name__ == "__main__":
+    server.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+            
